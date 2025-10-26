@@ -10,7 +10,7 @@ app = Flask(__name__)
 @app.route("/check", methods=["GET"])
 def check():
     user_id = request.args.get("id")
-    next_page = request.args.get("next", "/")  # куда редиректить после проверки
+    next_page = request.args.get("next", "/")  # целевой URL
 
     if not user_id:
         return f"""
@@ -21,7 +21,8 @@ def check():
     try:
         member = bot.get_chat_member(CHANNEL, int(user_id))
         if member.status in ["member", "administrator", "creator"]:
-            return redirect(next_page)
+            # Редирект на внешний сайт
+            return redirect(next_page, code=302)
         else:
             return f"""
             <h3>❌ Подпишитесь на канал <a href='https://t.me/{CHANNEL[1:]}'>{CHANNEL}</a></h3>
@@ -29,5 +30,5 @@ def check():
     except Exception as e:
         return f"<h3>Ошибка проверки подписки: {e}</h3>"
 
-if __name__ == "__main__":
+if name == "__main__":
     app.run(host="0.0.0.0", port=5000)
