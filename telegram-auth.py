@@ -29,5 +29,5 @@ def check():
     except Exception as e:
         return f"<h3>Ошибка проверки подписки: {e}</h3>"
 
-if name == "__main__":
+if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
