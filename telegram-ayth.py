@@ -1,42 +1,71 @@
-from flask import Flask, request, redirect
-import hashlib, hmac
-from aiogram import Bot
-import asyncio
+import os
+import threading
+from flask import Flask, request, jsonify
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.utils.exceptions import ChatNotFound, Unauthorized
 
+# === Настройки ===
+BOT_TOKEN = "7996753569:AAFu1k4_ybkkpFj2183oNE0ITSt6ayuTezc"
+CHANNEL = "@SchoolAwards"  # Канал, на который должен быть подписан пользователь
+
+# === Инициализация ===
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 app = Flask(__name__)
 
-# Твой токен от BotFather
-TOKEN = "7996753569:AAFu1k4_ybkkpFj2183oNE0ITSt6ayuTezc"
-CHANNEL = "@SchoolAwards"
+# === Flask: проверка работы сайта ===
+@app.route('/')
+def home():
+    return "✅ Бот SchoolAwards работает!"
 
-bot = Bot(token=TOKEN)
+# === Flask: страница авторизации через Telegram ===
+@app.route('/telegram-auth', methods=['GET'])
+def telegram_auth():
+    # Проверяем, есть ли данные от Telegram
+    user_id = request.args.get('id')
+    first_name = request.args.get('first_name', '')
+    username = request.args.get('username', '')
 
-def check_hash(data):
-    auth_data = dict(data)
-    received_hash = auth_data.pop('hash')
-    check_string = '\n'.join([f"{k}={v}" for k, v in sorted(auth_data.items())])
-    secret_key = hashlib.sha256(TOKEN.encode()).digest()
-    h = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-    return h == received_hash
+    if not user_id:
+        return "Ошибка: не удалось получить данные пользователя.", 400
 
-@app.route("/telegram-auth")
-def auth():
-    data = request.args
-    if not check_hash(data):
-        return "Ошибка проверки подписи."
-
-    user_id = int(data.get("id"))
+    # Проверка подписки на канал
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        member = loop.run_until_complete(bot.get_chat_member(CHANNEL, user_id))
-        if member.status in ("member", "administrator", "creator"):
-            return f"✅ Добро пожаловать, {data.get('first_name')}!"
+        member = bot.get_chat_member(CHANNEL, int(user_id))
+        if member and member.status in ["member", "administrator", "creator"]:
+            return f"✅ Добро пожаловать, {first_name or username}! Вы успешно авторизовались через Telegram."
         else:
-            return redirect("https://t.me/SchoolAwards")
+            return f"❌ Пожалуйста, подпишитесь на канал <a href='https://t.me/{CHANNEL[1:]}'>{CHANNEL}</a> и попробуйте снова.", 403
+    except ChatNotFound:
+        return "Ошибка: канал не найден. Проверь название канала.", 500
+    except Unauthorized:
+        return "Ошибка: бот не добавлен в канал или не имеет прав для проверки подписчиков.", 500
     except Exception as e:
-        return f"Ошибка проверки подписки: {e}"
+        return f"Ошибка при проверке подписки: {e}", 500
 
+# === Aiogram: приветственное сообщение в Telegram ===
+@dp.message_handler(commands=['start'])
+async def start_cmd(message: types.Message):
+    text = (
+        "👋 Привет! Это бот авторизации для School Awards.\n\n"
+        "Чтобы авторизоваться на сайте, нажми кнопку ниже 👇"
+    )
+    # Создаем кнопку входа через Telegram
+    button = types.InlineKeyboardButton(
+        "Войти через Telegram",
+        url="https://http://a1183826.xsph.ru/.onrender.com/telegram-auth"
+    )
+    keyboard = types.InlineKeyboardMarkup().add(button)
+    await message.answer(text, reply_markup=keyboard)
+
+# === Функция запуска бота ===
+def run_bot():
+    executor.start_polling(dp, skip_updates=True)
+
+# === Запуск Flask + Aiogram в двух потоках ===
 if name == "__main__":
-    import os
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.start()
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
