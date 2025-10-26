@@ -47,7 +47,7 @@ def cmd_start(message):
     bot.send_message(message.chat.id, text, reply_markup=markup)
 
 # === Запуск Flask + бота ===
-if name == "__main__":
+if __name__ == "__main__":
     import threading
 
     # Запускаем Telegram-бота в отдельном потоке
