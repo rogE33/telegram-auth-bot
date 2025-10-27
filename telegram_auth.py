@@ -1,94 +1,88 @@
-from flask import Flask, redirect, request, jsonify
-import telebot
+from flask import Flask, request, redirect, render_template_string
+import requests
+import hmac
+import hashlib
+import time
 import os
 
-# === Настройки ===
-BOT_TOKEN = "7996753569:AAFu1k4_ybkkpFj2183oNE0ITSt6ayuTezc"  # вставь сюда токен своего бота
-CHANNEL_USERNAME = "@SchoolAwards"  # название канала
-REDIRECT_URL = "http://a1183826.xsph.ru/?p=111"  # куда отправлять после проверки
+TOKEN = "7996753569:AAFu1k4_ybkkpFj2183oNE0ITSt6ayuTezc"
+CHANNEL_ID = "@SchoolAwards"
+REDIRECT_URL = "http://a1183826.xsph.ru/?p=111"
 
 app = Flask(__name__)
-bot = telebot.TeleBot(BOT_TOKEN)
 
-# === Проверка подписки ===
-def check_subscription(user_id):
-    try:
-        member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status in ("member", "administrator", "creator")
-    except Exception as e:
-        print("Ошибка при проверке:", e)
-        return False
+HTML_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Авторизация Telegram</title>
+    <style>
+        body {
+            font-family: Arial;
+            text-align: center;
+            background-color: #fff;
+            margin-top: 15%;
+        }
+        button {
+            background-color: white;
+            color: black;
+            border: 2px solid #B39298;
+            padding: 12px 30px;
+            border-radius: 30px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: #B39298;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h2>Авторизация через Telegram</h2>
+    <script async src="https://telegram.org/js/telegram-widget.js?7"
+        data-telegram-login="SchoolAwards_bot"
+        data-size="large"
+        data-userpic="false"
+        data-auth-url="https://schoolawards-auth.onrender.com/auth"
+        data-request-access="write">
+    </script>
+</body>
+</html>
+"""
 
-# === Главная страница (кнопка авторизации) ===
-@app.route("/")
-def home():
-    return """
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body {
-                font-family: Arial;
-                background: #f9f9f9;
-                text-align: center;
-                padding-top: 100px;
-            }
-            a.button {
-                display: inline-block;
-                padding: 15px 40px;
-                background: white;
-                color: black;
-                text-decoration: none;
-                border-radius: 40px;
-                font-weight: bold;
-                transition: background 0.3s;
-                border: 2px solid #B39298;
-            }
-            a.button:hover {
-                background: #B39298;
-                color: white;
-            }
-        </style>
-    </head>
-    <body>
-        <a class="button" href="/start_auth">Голосовать</a>
-    </body>
-    </html>
-    """
+def check_signature(data_dict, token):
+    auth_data = {k: v for k, v in data_dict.items() if k != 'hash'}
+    data_check_string = "\n".join([f"{k}={v}" for k, v in sorted(auth_data.items())])
+    secret_key = hashlib.sha256(token.encode()).digest()
+    h = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    return h == data_dict.get('hash')
 
-# === Начало авторизации ===
-@app.route("/start_auth")
-def start_auth():
-    telegram_login = f"https://t.me/{CHANNEL_USERNAME.lstrip('@')}"
-    return f"""
-    <html><body style='font-family: Arial; text-align: center; padding-top: 100px;'>
-    <p>Для продолжения подпишитесь на наш Telegram-канал:</p>
-    <a href="{telegram_login}" target="_blank">Перейти в Telegram</a><br><br>
-    <form action="/check_subscription" method="get">
-        <input type="number" name="user_id" placeholder="Введите ваш Telegram ID" required>
-        <button type="submit">Проверить</button>
-    </form>
-    </body></html>
-    """
+@app.route('/')
+def index():
+    return render_template_string(HTML_PAGE)
 
-# === Проверка подписки ===
-@app.route("/check_subscription")
-def check():
-    user_id = request.args.get("user_id")
-    if not user_id:
-        return "Ошибка: не указан Telegram ID."
+@app.route('/auth')
+def auth():
+    data = request.args.to_dict()
+    if not check_signature(data, TOKEN):
+        return "Ошибка проверки подписи Telegram."
 
-    try:
-        user_id = int(user_id)
-    except ValueError:
-        return "Некорректный ID."
+    user_id = data.get('id')
+    status = requests.get(
+        f"https://api.telegram.org/bot{TOKEN}/getChatMember",
+        params={"chat_id": CHANNEL_ID, "user_id": user_id}
+    ).json()
 
-    if check_subscription(user_id):
-        return redirect(REDIRECT_URL)
+    if status.get("ok"):
+        member_status = status["result"]["status"]
+        if member_status in ("member", "administrator", "creator"):
+            return redirect(REDIRECT_URL)
+        else:
+            return "❌ Вы не подписаны на канал @SchoolAwards."
     else:
-        return "❌ Вы не подписаны на канал. Подпишитесь и попробуйте снова."
+        return "Не удалось получить данные о подписке."
 
-# === Запуск ===
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
